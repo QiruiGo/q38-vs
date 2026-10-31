@@ -1,0 +1,26 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{82b43b9b-a64c-4715-b499-d71e9ca2bd60}") = "Q38Vs", "src\Q38Vs\Q38Vs.csproj", "{3F9C2D64-8A1E-4B7F-9D05-62C8E4A1B7F9}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3F9C2D64-8A1E-4B7F-9D05-62C8E4A1B7F9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3F9C2D64-8A1E-4B7F-9D05-62C8E4A1B7F9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3F9C2D64-8A1E-4B7F-9D05-62C8E4A1B7F9}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{3F9C2D64-8A1E-4B7F-9D05-62C8E4A1B7F9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3F9C2D64-8A1E-4B7F-9D05-62C8E4A1B7F9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3F9C2D64-8A1E-4B7F-9D05-62C8E4A1B7F9}.Release|Any CPU.Deploy.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {4B16D8D9-E700-408B-9511-ACB840867495}
+	EndGlobalSection
+EndGlobal

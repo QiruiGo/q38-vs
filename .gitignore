@@ -1,0 +1,28 @@
+# Build output
+bin/
+obj/
+*.vsix
+
+# IDE / tool caches
+.vs/
+.cache/
+
+# Probe and scratch directories
+_probe/
+
+# Logs and local diagnostics
+*.log
+activity.xml
+plugin-debug.log
+vsix-install.log
+
+# Local install / debug scripts (machine-specific, never commit)
+elevated-reinstall.*
+install-q38vs.bat
+
+# Internal planning documents
+派工计划*.md
+
+# Screenshots are taken at release time; keep the directory via .gitkeep
+*.csproj.user
+vsix-acceptance.txt

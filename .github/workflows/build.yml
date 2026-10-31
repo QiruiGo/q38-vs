@@ -1,0 +1,141 @@
+name: build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify VSIX
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The windows-latest runner image ships Visual Studio 2022 (17.x)
+      # preinstalled, including the Visual Studio SDK (VSSDK) assemblies a
+      # VSIX project needs. Do NOT install Visual Studio or the "Visual
+      # Studio extension development" workload on the runner — this step
+      # only locates msbuild and adds it to PATH.
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      # Restore NuGet packages for the solution.
+      - name: Restore
+        shell: cmd
+        run: msbuild Q38Vs.sln /v:m /restore /t:Restore /p:Configuration=Release
+
+      # Build the VSIX in Release. DeployExtension=false prevents the build
+      # from trying to install the extension into a VS experimental hive on
+      # the CI runner.
+      - name: Build
+        shell: cmd
+        run: msbuild Q38Vs.sln /v:m /m /p:Configuration=Release /p:DeployExtension=false
+
+      # Sanity checks on the produced VSIX before it is uploaded: the chat
+      # page asset must be packaged, the pkgdef registration (Unicode text)
+      # must reference the assembly via a "CodeBase" record, and the manifest
+      # must declare the expected extension version.
+      - name: Verify VSIX contents
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $vsixPath = 'src/Q38Vs/bin/Release/Q38Vs.vsix'
+          if (-not (Test-Path $vsixPath)) {
+            Write-Host "::error::VSIX not found at $vsixPath"
+            exit 1
+          }
+
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $vsixPath).Path)
+          try {
+            function Read-EntryBytes([System.IO.Compression.ZipArchiveEntry]$Entry) {
+              $stream = $Entry.Open()
+              try {
+                $bytes = New-Object byte[] ($Entry.Length)
+                $offset = 0
+                while ($offset -lt $bytes.Length) {
+                  $read = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+                  if ($read -le 0) { break }
+                  $offset += $read
+                }
+                return ,$bytes
+              } finally {
+                $stream.Dispose()
+              }
+            }
+
+            $entryNames = @($zip.Entries | ForEach-Object { $_.FullName })
+
+            # 1) The chat WebView page must be packaged.
+            if ($entryNames -notcontains 'ChatPage/chat.html') {
+              Write-Host '::error::VSIX does not contain ChatPage/chat.html'
+              exit 1
+            }
+
+            # 2) The pkgdef registration entry (pkgdef files are Unicode
+            #    text) must reference the assembly via a "CodeBase" record.
+            $pkgdef = $zip.Entries | Where-Object { $_.FullName -like '*.pkgdef' } | Select-Object -First 1
+            if (-not $pkgdef) {
+              Write-Host '::error::VSIX does not contain a .pkgdef entry'
+              exit 1
+            }
+            $pkgdefText = [System.Text.Encoding]::Unicode.GetString((Read-EntryBytes $pkgdef))
+            if ($pkgdefText -notlike '*"CodeBase"*') {
+              Write-Host '::error::pkgdef entry does not contain "CodeBase"'
+              exit 1
+            }
+
+            # 3) The VSIX manifest must declare version 0.2.0.
+            $manifest = $zip.Entries | Where-Object { $_.FullName -eq 'extension.vsixmanifest' } | Select-Object -First 1
+            if (-not $manifest) {
+              Write-Host '::error::VSIX does not contain extension.vsixmanifest'
+              exit 1
+            }
+            $manifestText = [System.Text.Encoding]::UTF8.GetString((Read-EntryBytes $manifest))
+            if ($manifestText -notlike '*Version="0.2.0"*') {
+              Write-Host '::error::manifest does not declare Version="0.2.0"'
+              exit 1
+            }
+
+            Write-Host ('VSIX verification passed ({0} entries).' -f $entryNames.Count)
+            exit 0
+          } finally {
+            $zip.Dispose()
+          }
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: q38-vs-vsix
+          path: src/Q38Vs/bin/Release/*.vsix
+          if-no-files-found: error
+
+  # Attach the built VSIX to a GitHub Release when a v* tag is pushed.
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: q38-vs-vsix
+          path: dist
+
+      - name: Attach VSIX to the GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*.vsix

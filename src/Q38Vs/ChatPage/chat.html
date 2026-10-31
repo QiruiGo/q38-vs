@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-q38-skin="q38-ink">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Qwenthin (q38)</title>
+<link rel="stylesheet" href="chat.css" />
+</head>
+<body>
+  <header id="bar">
+    <span id="dot" class="dot connecting" title="连接状态"></span>
+    <span id="title">Qwenthin</span>
+    <span id="meta"></span>
+    <button id="stop" class="ghost hidden" title="中止当前轮次">■ 停止</button>
+  </header>
+  <div id="statusbar" class="hidden"></div>
+
+  <main id="scroller">
+    <div id="list"></div>
+  </main>
+
+  <div id="permit" class="hidden">
+    <div class="permit-head">
+      <span class="permit-badge">审批</span>
+      <span id="permit-tool"></span>
+    </div>
+    <pre id="permit-preview"></pre>
+    <div class="permit-actions">
+      <button id="p-allow" class="primary">允许</button>
+      <button id="p-always" class="ghost">本轮总是允许</button>
+      <button id="p-deny" class="danger">拒绝</button>
+    </div>
+  </div>
+
+  <div id="ctxchip" class="hidden">
+    <span id="ctx-text"></span>
+    <button id="ctx-clear" class="chip-x" title="移除上下文">×</button>
+  </div>
+
+  <footer id="composer">
+    <button id="ctx-btn" title="附加 VS 当前文档 / 选中代码">＠</button>
+    <textarea id="input" rows="1" placeholder="问点什么…（Enter 发送 / Shift+Enter 换行）"></textarea>
+    <button id="send" class="primary" title="发送">↩</button>
+  </footer>
+
+  <script src="chat.js"></script>
+</body>
+</html>

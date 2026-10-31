@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+  <Metadata>
+    <Identity Language="en-US" Id="Q38Vs" Version="0.2.0" Publisher="QiruiGo" />
+    <DisplayName>Qwenthin (q38)</DisplayName>
+    <Description xml:space="preserve">Visual Studio 2022 panel for the q38 local coding agent — streaming chat, approval cards, solution workspace binding, and zero-key web search.</Description>
+    <MoreInfo>https://github.com/wu1w/qwenthin</MoreInfo>
+    <Tags>q38,qwenthin,agent</Tags>
+  </Metadata>
+  <Installation>
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0, 18.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+  </Installation>
+  <Prerequisites>
+    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="17.0" />
+  </Prerequisites>
+  <Dependencies>
+  </Dependencies>
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.VsPackage" d:VsixSubPath="" Path="|%CurrentProject%;PkgdefProjectOutputGroup|" />
+  </Assets>
+</PackageManifest>
