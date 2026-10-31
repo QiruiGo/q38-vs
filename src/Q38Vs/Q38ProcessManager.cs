@@ -16,6 +16,8 @@ namespace Q38Vs
     public sealed class Q38ProcessManager : IDisposable
     {
         public const int DefaultPort = 3848;
+        private const int PickFreePortStart = 3849;  // 空闲端口探测的起始端口（= DefaultPort + 1，避开默认端口 3848）
+        private const int PickFreePortUpper = 3960;   // 空闲端口探测的上限（不含），实际最大候选为 3959
 
         public int Port { get; private set; }
         public bool Attached { get; private set; }
@@ -65,7 +67,7 @@ namespace Q38Vs
 
         private static int PickFreePort()
         {
-            for (var port = 3849; port < 3960; port++)
+            for (var port = PickFreePortStart; port < PickFreePortUpper; port++)
             {
                 try
                 {

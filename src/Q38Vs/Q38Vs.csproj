@@ -64,6 +64,7 @@
     <Compile Include="Q38ProcessManager.cs" />
     <Compile Include="Q38ToolWindow.cs" />
     <Compile Include="Q38WebViewHost.cs" />
+    <Compile Include="StringUtils.cs" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="ChatPage\chat.css">
