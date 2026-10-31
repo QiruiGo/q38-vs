@@ -97,15 +97,15 @@ jobs:
               exit 1
             }
 
-            # 3) The VSIX manifest must declare version 0.2.0.
+            # 3) The VSIX manifest must declare a semver Version (any).
             $manifest = $zip.Entries | Where-Object { $_.FullName -eq 'extension.vsixmanifest' } | Select-Object -First 1
             if (-not $manifest) {
               Write-Host '::error::VSIX does not contain extension.vsixmanifest'
               exit 1
             }
             $manifestText = [System.Text.Encoding]::UTF8.GetString((Read-EntryBytes $manifest))
-            if ($manifestText -notlike '*Version="0.2.0"*') {
-              Write-Host '::error::manifest does not declare Version="0.2.0"'
+            if ($manifestText -notmatch 'Version="\d+\.\d+\.\d+"') {
+              Write-Host '::error::manifest does not declare a Version="x.y.z"'
               exit 1
             }
 
