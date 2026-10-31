@@ -10,8 +10,8 @@ namespace Q38Vs
 {
     /// <summary>
     /// 聊天页 ↔ q38 的翻译层。页面只认这些消息（均为 JSON 文本 postMessage）：
-    ///  页 → 宿主：ready / {type:"send",text} / {type:"abort"} / {type:"permitDecision",id,decision} / {type:"getContext"}
-    ///  宿主 → 页：status / state / hello / event / history / permit / context / error
+    ///  页 → 宿主：ready / {type:"send",text,content_parts?} / {type:"abort"} / {type:"permitDecision",id,decision} / {type:"getContext"} / {type:"openFile",path,line}
+    ///  宿主 → 页：status / state / hello / event / history / permit / context / toast / error
     /// 不做任何 agent 逻辑，只是壳 + 翻译器。
     /// </summary>
     public sealed class ChatBridge : IDisposable
@@ -47,7 +47,8 @@ namespace Q38Vs
                     break;
                 case "send":
                     var text = node["text"]?.GetValue<string>() ?? "";
-                    if (text.Length > 0) Task.Run(() => SafeAsync(() => SendAsync(text)));
+                    var parts = node["content_parts"] as JsonArray;
+                    if (text.Length > 0) Task.Run(() => SafeAsync(() => SendAsync(text, parts)));
                     break;
                 case "abort":
                     Task.Run(() => SafeAsync(() => _client?.RpcAsync("turn.abort", null, 5000)));
@@ -58,11 +59,13 @@ namespace Q38Vs
                     Task.Run(() => SafeAsync(() => _client?.PermitAsync(id, decision)));
                     break;
                 case "getContext":
-                    _dispatcher.BeginInvoke(() =>
-                    {
-                        var ctx = VsContext.ActiveFile();
-                        Post(new JsonObject { ["type"] = "context", ["text"] = ctx });
-                    });
+                    var ctx = _dispatcher.Invoke(() => VsContext.ActiveContext());
+                    Post(new JsonObject { ["type"] = "context", ["context"] = ctx });
+                    break;
+                case "openFile":
+                    var path = node["path"]?.GetValue<string>() ?? "";
+                    var line = (int)(node["line"]?.GetValue<long>() ?? 0);
+                    if (path.Length > 0) Task.Run(() => OpenFileInVs(path, line));
                     break;
             }
         }
@@ -102,18 +105,41 @@ namespace Q38Vs
             }
         }
 
-        private async Task SendAsync(string text)
+        private async Task SendAsync(string text, JsonArray? contentParts)
         {
             if (_client == null) return;
             try
             {
                 // turn.start 阻塞到整轮结束；期间流式增量全走 WS。忙时改排队。
+                // content_parts（＠ 附加的上下文）turn.start / turn.queue 两条路都透传。
                 var method = _busy ? "turn.queue" : "turn.start";
-                await _client.RpcAsync(method, new { text }, -1, _cts.Token).ConfigureAwait(false);
+                object parameters = contentParts is { Count: > 0 }
+                    ? new { text, content_parts = contentParts }
+                    : new { text };
+                await _client.RpcAsync(method, parameters, -1, _cts.Token).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 PostError(ex.Message);
+            }
+        }
+
+        /// <summary>工具轨迹里的路径点击：UI 线程走 DTE 打开（相对路径以解决方案目录解析），
+        /// 失败以 toast 回发页面，不抛异常打断。</summary>
+        private void OpenFileInVs(string path, int line)
+        {
+            try
+            {
+                var error = _dispatcher.Invoke(() =>
+                {
+                    try { VsContext.OpenDocument(path, line); return null; }
+                    catch (Exception ex) { return ex.Message; }
+                });
+                if (error != null) PostToast("无法打开 " + path + "：" + error);
+            }
+            catch (Exception ex)
+            {
+                PostToast("无法打开 " + path + "：" + ex.Message);
             }
         }
 
@@ -175,6 +201,8 @@ namespace Q38Vs
 
         private void PostError(string message) => Post(new JsonObject { ["type"] = "error", ["message"] = message });
 
+        private void PostToast(string message) => Post(new JsonObject { ["type"] = "toast", ["message"] = message });
+
         private void Post(JsonObject message)
         {
             // CoreWebView2 线程仿单：序列化在本线程做完，回 UI 线程再 Post。
@@ -206,22 +234,51 @@ namespace Q38Vs
             catch { return ""; }
         }
 
-        /// <summary>活动文档 + 选区，格式化成可贴进 prompt 的 Markdown 块；无活动文档返回空串。</summary>
-        public static string ActiveFile()
+        /// <summary>活动文档 + 选区的结构化上下文；无活动文档返回 null。必须在 UI 线程调用。</summary>
+        public static JsonObject? ActiveContext()
         {
             try
             {
                 var dte = Microsoft.VisualStudio.Shell.ServiceProvider.GlobalProvider.GetService(
                     typeof(EnvDTE.DTE)) as EnvDTE.DTE;
                 var doc = dte?.ActiveDocument;
-                if (doc == null || string.IsNullOrEmpty(doc.FullName)) return "";
+                if (doc == null || string.IsNullOrEmpty(doc.FullName)) return null;
                 var selection = doc.Selection as EnvDTE.TextSelection;
-                var text = selection?.Text;
-                var lang = Path.GetExtension(doc.FullName).TrimStart('.').ToLowerInvariant();
-                if (string.IsNullOrEmpty(text)) return $"@{doc.FullName}";
-                return $"@{doc.FullName}（当前选中部分）：\n```{lang}\n{text}\n```";
+                var text = selection?.Text ?? "";
+                var hasSel = !string.IsNullOrEmpty(text);
+                return new JsonObject
+                {
+                    ["path"] = doc.FullName,
+                    ["name"] = Path.GetFileName(doc.FullName),
+                    ["hasSelection"] = hasSel,
+                    ["lineStart"] = hasSel ? selection!.TopPoint.Line : 0,
+                    ["lineEnd"] = hasSel ? selection!.BottomPoint.Line : 0,
+                    ["text"] = hasSel ? text : "",
+                };
             }
-            catch { return ""; }
+            catch { return null; }
+        }
+
+        /// <summary>DTE 打开文件（相对路径以解决方案目录解析），line&gt;0 时跳到该行。
+        /// EnvDTE.ItemOperations 没有 OpenDocumentViaPath 成员，打开走 OpenFile；
+        /// 必须在 UI 线程调用；失败抛异常，由调用方转成 toast。</summary>
+        public static void OpenDocument(string path, int line)
+        {
+            var dte = Microsoft.VisualStudio.Shell.ServiceProvider.GlobalProvider.GetService(
+                typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+            if (dte?.ItemOperations == null) throw new InvalidOperationException("VS 编辑器服务不可用");
+            if (!Path.IsPathRooted(path))
+            {
+                var dir = SolutionDirectory();
+                if (!string.IsNullOrEmpty(dir)) path = Path.GetFullPath(Path.Combine(dir, path));
+            }
+            var window = dte.ItemOperations.OpenFile(path, EnvDTE.Constants.vsViewKindCode);
+            window?.Activate();
+            if (line > 0)
+            {
+                var sel = window?.Document?.Selection as EnvDTE.TextSelection;
+                sel?.GotoLine(line, true);
+            }
         }
     }
 }

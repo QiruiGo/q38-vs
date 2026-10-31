@@ -164,6 +164,29 @@ html, body {
   cursor: pointer;
 }
 .tool.expanded .tool-out { max-height: none; }
+.tool-out .path-link {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.tool-out .path-link:hover { color: var(--accent-hover); }
+
+/* toast：宿主回发的轻提示（如打不开文件），自动消失 */
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%);
+  background: var(--bg-layer-3);
+  border: 1px solid var(--error);
+  color: var(--text-1);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 12px;
+  max-width: 80%;
+  z-index: 10;
+  pointer-events: none;
+}
 
 /* 系统/策略/停止等窄条 */
 .notice {
@@ -218,21 +241,25 @@ html, body {
 .permit-actions { display: flex; gap: 8px; }
 
 /* ---------- 上下文 chip ---------- */
-#ctxchip {
+#ctxchips {
   flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 12px 6px;
+}
+.ctxchip {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 0 12px 6px;
   padding: 4px 10px;
   background: var(--bg-layer-2);
   border: 1px solid var(--border-l2);
   border-radius: 8px;
   font-size: 11.5px;
   color: var(--accent);
-  max-width: calc(100% - 24px);
 }
-#ctx-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip-x {
   flex: none;
   background: none;

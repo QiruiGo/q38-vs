@@ -1,6 +1,6 @@
 /* q38-vs 聊天页。与宿主（ChatBridge）只走 postMessage：
-   页 → 宿主：ready / send / abort / permitDecision / getContext
-   宿主 → 页：status / state / hello / event / history / permit / context / error */
+   页 → 宿主：ready / send / abort / permitDecision / getContext / openFile
+   宿主 → 页：status / state / hello / event / history / permit / context / toast / error */
 
 const $ = (id) => document.getElementById(id);
 const list = $("list");
@@ -8,7 +8,7 @@ const scroller = $("scroller");
 const input = $("input");
 
 let busy = false;
-let pendingContext = "";
+let contexts = [];   // ＠ 附加的上下文芯片：{ path, hasSel, lineStart, lineEnd, text }
 let permitId = null;
 
 // 流式中的气泡（delta 还原）：{ root, reasoningBody, contentEl, reasoning, content }
@@ -55,15 +55,26 @@ function handleHost(msg) {
       break;
     }
     case "context": {
-      pendingContext = msg.text || "";
-      if (pendingContext) {
-        $("ctx-text").textContent = pendingContext.split("\n")[0];
-        $("ctxchip").classList.remove("hidden");
+      const ctx = msg.context;
+      if (ctx && ctx.path) {
+        // 同一文档重复 ＠ → 覆盖旧芯片（刷新选区）
+        contexts = contexts.filter((c) => c.path !== ctx.path);
+        contexts.push({
+          path: ctx.path,
+          hasSel: !!ctx.hasSelection,
+          lineStart: ctx.lineStart || 0,
+          lineEnd: ctx.lineEnd || 0,
+          text: ctx.text || "",
+        });
+        renderChips();
       } else {
-        $("ctxchip").classList.add("hidden");
+        showToast("没有可附加的活动文档");
       }
       break;
     }
+    case "toast":
+      showToast(msg.message || "");
+      break;
     case "error":
       renderNotice("error", msg.message || "发生错误");
       break;
@@ -204,14 +215,81 @@ function addTool(e) {
   const out = document.createElement("pre");
   out.className = "tool-out";
   const text = e.output || "";
-  out.textContent = text.length > 500 ? text.slice(0, 500) + "\n…（点击展开，共 " + text.length + " 字符）" : text;
-  if (text.length > 500) out.addEventListener("click", () => {
+  const truncated = text.length > 500;
+  renderTextWithPaths(out, truncated ? text.slice(0, 500) + "\n…（点击展开，共 " + text.length + " 字符）" : text);
+  if (truncated) out.addEventListener("click", () => {
     el.classList.toggle("expanded");
-    out.textContent = el.classList.contains("expanded") ? text : text.slice(0, 500) + "\n…";
+    out.innerHTML = "";
+    renderTextWithPaths(out, el.classList.contains("expanded") ? text : text.slice(0, 500) + "\n…");
   });
   el.appendChild(name);
   el.appendChild(out);
   list.appendChild(el);
+}
+
+/* ---------- 工具输出里的文件路径 → 可点链接 ----------
+   认两种形态：绝对盘符（D:\x\y.cs）与含目录分隔符的相对路径（src\Q38Vs\chat.js、
+   ./a/b.rs、../c/d.ts），均可带 :行号 后缀；行首 "NN| " 前缀（grep 风格）紧邻路径时
+   NN 作为默认行号。点击 postMessage {type:"openFile", path, line} 给宿主。 */
+
+// 末段须含点（有扩展名）才认成文件，避免把普通词组/URL 误判；路径字符不含冒号/空白，
+// 所以 "D:\a.cs:12" 里的行号天然落到第二个捕获组。
+const PATH_RE = /(?<![\w.:/\\-])([A-Za-z]:[\\/](?:[^\s:\\/]+[\\/])*[^\s:\\/]+|(?:(?:\.{1,2}[\\/])?[\w.@\\-]+(?:[\\/][\w.@\\-]+)+))(:\d+)?/g;
+const TRAIL_PUNCT = /[.,;!?)\]}'">…。，；！？）】》」』]+$/;
+
+function renderTextWithPaths(outEl, text) {
+  const lines = String(text).split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (i) outEl.appendChild(document.createTextNode("\n"));
+    linkifyLine(outEl, lines[i]);
+  }
+}
+
+function linkifyLine(outEl, line) {
+  let rest = line, prefixLine = 0;
+  // 行首 "NN| "：仅当其后紧跟路径才吞掉前缀，NN 作为行号兜底
+  const pm = rest.match(/^\s*(\d{1,5})\s*\|\s?/);
+  if (pm) {
+    PATH_RE.lastIndex = 0;
+    const probe = PATH_RE.exec(rest.slice(pm[0].length));
+    if (probe && probe.index === 0 && lastSegHasDot(probe[1])) {
+      outEl.appendChild(document.createTextNode(pm[0]));
+      prefixLine = parseInt(pm[1], 10);
+      rest = rest.slice(pm[0].length);
+    }
+  }
+  let last = 0, hit;
+  PATH_RE.lastIndex = 0;
+  while ((hit = PATH_RE.exec(rest))) {
+    let path = hit[1];
+    let end = hit.index + hit[0].length;
+    // 剥掉粘在路径尾部的标点（句子收尾等）
+    const punct = path.match(TRAIL_PUNCT);
+    if (punct) { path = path.slice(0, path.length - punct[0].length); end -= punct[0].length; }
+    if (hit.index > last) outEl.appendChild(document.createTextNode(rest.slice(last, hit.index)));
+    last = end;
+    if (!lastSegHasDot(path)) {
+      outEl.appendChild(document.createTextNode(rest.slice(hit.index, end)));
+      continue;
+    }
+    const lineNo = hit[2] ? parseInt(hit[2].slice(1), 10) : prefixLine;
+    const a = document.createElement("a");
+    a.className = "path-link";
+    a.textContent = rest.slice(hit.index, end);
+    a.title = "在 VS 中打开" + (lineNo > 0 ? "（第 " + lineNo + " 行）" : "");
+    a.addEventListener("click", (ev) => {
+      ev.stopPropagation(); // 别触发外层 pre 的展开/收起
+      post({ type: "openFile", path: path, line: lineNo });
+    });
+    outEl.appendChild(a);
+  }
+  if (last < rest.length) outEl.appendChild(document.createTextNode(rest.slice(last)));
+}
+
+function lastSegHasDot(path) {
+  const segs = String(path).split(/[\\/]/);
+  const tail = segs[segs.length - 1] || "";
+  return tail.indexOf(".") > 0;
 }
 
 /* ---------- 流式 delta ---------- */
@@ -324,13 +402,68 @@ function decide(decision) {
   hidePermit();
 }
 
+/* ---------- 上下文芯片 ---------- */
+
+function fileName(p) {
+  const segs = String(p).split(/[\\/]/);
+  return segs[segs.length - 1] || p;
+}
+
+function renderChips() {
+  const box = $("ctxchips");
+  box.innerHTML = "";
+  box.classList.toggle("hidden", contexts.length === 0);
+  for (const c of contexts) {
+    const chip = document.createElement("div");
+    chip.className = "ctxchip";
+    const label = document.createElement("span");
+    label.className = "ctx-label";
+    const text = c.hasSel ? fileName(c.path) + " · L" + c.lineStart + (c.lineEnd > c.lineStart ? "-L" + c.lineEnd : "")
+                          : fileName(c.path);
+    label.textContent = text;
+    label.title = c.path + (c.hasSel ? " · 已选中 " + c.text.length + " 字符" : "");
+    const x = document.createElement("button");
+    x.className = "chip-x";
+    x.title = "移除上下文";
+    x.textContent = "×";
+    x.addEventListener("click", () => {
+      contexts = contexts.filter((it) => it !== c);
+      renderChips();
+    });
+    chip.appendChild(label);
+    chip.appendChild(x);
+    box.appendChild(chip);
+  }
+}
+
+/* 发送前把芯片格式化成上下文块。上游 q38 的 turn.start 只消费 prompt/text 与媒体
+   part（ContentPart::media_part 对 text 恒为 None），本地文件引用不会被读取，
+   所以真正生效的是拼进 text 的格式化块；content_parts 按 wire shape 一并带给
+   宿主透传（turn.start / turn.queue 都带），上游侧忽略，仅为对齐协议。 */
+function contextBlock(c) {
+  if (!c.hasSel) return "@" + c.path;
+  const name = fileName(c.path);
+  const dot = name.lastIndexOf(".");
+  const lang = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+  const range = c.lineEnd > c.lineStart ? "L" + c.lineStart + "-L" + c.lineEnd : "L" + c.lineStart;
+  return "@" + c.path + "（" + range + "，当前选中部分）：\n```" + lang + "\n" + c.text + "\n```";
+}
+
+/* ---------- toast ---------- */
+
+let toastTimer = 0;
+function showToast(message) {
+  if (!message) return;
+  const t = $("toast");
+  t.textContent = message;
+  t.classList.remove("hidden");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $("toast").classList.add("hidden"); toastTimer = 0; }, 3500);
+}
+
 /* ---------- 输入 ---------- */
 
 $("ctx-btn").addEventListener("click", () => post({ type: "getContext" }));
-$("ctx-clear").addEventListener("click", () => {
-  pendingContext = "";
-  $("ctxchip").classList.add("hidden");
-});
 
 $("send").addEventListener("click", send);
 $("stop").addEventListener("click", () => post({ type: "abort" }));
@@ -350,13 +483,15 @@ input.addEventListener("input", () => {
 function send() {
   const text = input.value.trim();
   if (!text) return;
-  let full = text;
-  if (pendingContext) {
-    full = pendingContext + "\n\n" + text;
-    pendingContext = "";
-    $("ctxchip").classList.add("hidden");
+  const msg = { type: "send", text: text };
+  if (contexts.length) {
+    const blocks = contexts.map(contextBlock);
+    msg.text = blocks.join("\n\n") + "\n\n" + text;
+    msg.content_parts = blocks.map((b) => ({ type: "text", text: b }));
+    contexts = [];
+    renderChips();
   }
-  post({ type: "send", text: full });
+  post(msg);
   input.value = "";
   input.style.height = "auto";
 }
